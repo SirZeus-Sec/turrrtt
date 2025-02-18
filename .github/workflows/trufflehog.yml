@@ -1,31 +1,27 @@
-name: TruffleHog Secret Scan
-
+name: trufflehog
 on:
-  push:
-    branches:
-      - main
   pull_request:
-    branches:
-      - main
+  push:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 4 * * *" # Run once a day at 4 AM UTC
 
 jobs:
-  test:
+  scan:
+    name: trufflehog
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Ensure full commit history is checked out
-
+          fetch-depth: 0
       - name: Install TruffleHog
         run: |
-          pip install trufflehog
-
-      - name: Secret Scanning with TruffleHog
+          pip install truffleHog
+      - name: Run TruffleHog Secret Scan
         run: |
-          trufflehog --regex --entropy=True --json https://github.com/${{ github.repository }} > result.json
+          trufflehog --regex --entropy=True https://github.com/${{ github.repository }}
         env:
-          GITHUB_TOKEN: ${{ secrets.MY_GITHUB_TOKEN }}  # Ensure GitHub token is passed for private repo access
+          GITHUB_TOKEN: ${{ secrets.MY_GITHUB_TOKEN }}
           
       - name: Check for secrets and comment on PR
         if: ${{ steps.trufflehog.outcome == 'success' }}
