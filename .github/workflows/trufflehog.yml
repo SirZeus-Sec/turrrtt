@@ -23,7 +23,7 @@ jobs:
 
       - name: Secret Scanning with TruffleHog
         run: |
-          trufflehog --regex --entropy=True https://github.com/${{ github.repository }} --results=verified,unknown
+          trufflehog --regex --entropy=True --json https://github.com/${{ github.repository }} > result.json
         env:
           GITHUB_TOKEN: ${{ secrets.MY_GITHUB_TOKEN }}  # Ensure GitHub token is passed for private repo access
           
