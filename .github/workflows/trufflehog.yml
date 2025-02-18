@@ -22,6 +22,3 @@ jobs:
           trufflehog --regex --entropy=True https://github.com/${{ github.repository }}
         env:
           GITHUB_TOKEN: ${{ secrets.MY_GITHUB_TOKEN }}
-          
- 
-
