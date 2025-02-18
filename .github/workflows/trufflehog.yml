@@ -1,0 +1,46 @@
+name: TruffleHog Secret Scan
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Ensure full commit history is checked out
+
+      - name: Install TruffleHog
+        run: |
+          pip install trufflehog
+
+      - name: Secret Scanning with TruffleHog
+        run: |
+          trufflehog --regex --entropy=True https://github.com/${{ github.repository }} --results=verified,unknown
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # Ensure GitHub token is passed for private repo access
+          
+      - name: Check for secrets and comment on PR
+        if: ${{ steps.trufflehog.outcome == 'success' }}
+        run: |
+          SECRET_COUNT=$(jq '.found_secrets | length' result.json)
+          if [ "$SECRET_COUNT" -gt 0 ]; then
+            echo "Secrets found! Creating PR comment..."
+            COMMENT="### 🚨 TruffleHog Secret Scan Results 🚨\n\n"
+            COMMENT="${COMMENT}#### Secrets Found:\n"
+            COMMENT="${COMMENT}$(jq -r '.found_secrets[] | "**File:** " + .File + "\n**Reason:** " + .Reason + "\n**Secret:** " + .Secret' result.json)"
+            echo "$COMMENT" > pr_comment.md
+            gh pr comment ${{ github.event.pull_request.number }} --body-file pr_comment.md
+          else
+            echo "No secrets found. No comment will be posted."
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
