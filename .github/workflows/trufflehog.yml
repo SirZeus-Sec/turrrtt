@@ -25,7 +25,7 @@ jobs:
         run: |
           trufflehog --regex --entropy=True https://github.com/${{ github.repository }} --results=verified,unknown
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # Ensure GitHub token is passed for private repo access
+          GITHUB_TOKEN: ${{ secrets.MY_GITHUB_TOKEN }}  # Ensure GitHub token is passed for private repo access
           
       - name: Check for secrets and comment on PR
         if: ${{ steps.trufflehog.outcome == 'success' }}
@@ -42,5 +42,5 @@ jobs:
             echo "No secrets found. No comment will be posted."
           fi
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.MY_GITHUB_TOKEN }}
 
