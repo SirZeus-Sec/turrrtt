@@ -1,58 +1,55 @@
 name: trufflehog
 on:
-  pull_request:
-  workflow_dispatch:
+  pull_request:  # Runs on new PRs to any branch
+  push:  # Runs on direct commits to any branch
+  workflow_dispatch:  # Allows manual triggering
 
 jobs:
   scan:
-    name: trufflehog
+    name: Secret Scan
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout Code
+        uses: actions/checkout@v4
         with:
-          fetch-depth: 0
-
-      - name: Install TruffleHog
-        run: |
-          pip install trufflehog jq
+          fetch-depth: 0  # Fetch full history to detect changes
 
       - name: Get Changed Files
         id: changed_files
         run: |
-          CHANGED_FILES=$(curl -s -H "Authorization: token ${{ secrets.MY_GITHUB_TOKEN }}" \
-            "https://api.github.com/repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
-            | jq -r '.[].filename')
+          git fetch origin ${{ github.base_ref }} --depth=1
+          CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }} ${{ github.sha }} | tr '\n' ' ')
+          echo "Changed files: $CHANGED_FILES"
+          echo "files=$CHANGED_FILES" >> $GITHUB_ENV
 
-          if [[ -z "$CHANGED_FILES" ]]; then
-            echo "No changed files detected."
+      - name: Install TruffleHog
+        run: |
+          pip install trufflehog
+
+      - name: Run TruffleHog Secret Scan
+        run: |
+          if [ -z "$files" ]; then
+            echo "No changed files detected. Skipping scan."
             exit 0
           fi
-
-          echo "CHANGED_FILES=${CHANGED_FILES}" >> $GITHUB_ENV
-
-      - name: Run TruffleHog Secret Scan on Changed Files
-        run: |
-          for file in $CHANGED_FILES; do
-            echo "Scanning $file..."
-            trufflehog --regex --entropy=True --json "$file" | tee -a trufflehog_output.json
-          done
-
+          trufflehog --regex --entropy=True --json $files > trufflehog_output.json || true
           if jq -e '.found' trufflehog_output.json > /dev/null; then
             echo "🚨 Secrets detected by TruffleHog!"
-            exit 1
+            echo "secrets_found=true" >> $GITHUB_ENV
+          else
+            echo "✅ No secrets found."
+            echo "secrets_found=false" >> $GITHUB_ENV
           fi
 
       - name: Post TruffleHog Results as PR Comment
-        if: failure()
+        if: env.secrets_found == 'true'
         run: |
           COMMENT="🚨 TruffleHog found secrets in this PR! Please check the logs."
-          PR_NUMBER=$(jq --raw-output .pull_request.number "$GITHUB_EVENT_PATH")
-
-          if [[ -z "$PR_NUMBER" || "$PR_NUMBER" == "null" ]]; then
+          PR_NUMBER="${{ github.event.pull_request.number }}"
+          if [[ -z "$PR_NUMBER" ]]; then
             echo "No PR number found. Skipping comment."
             exit 0
           fi
-
           curl -s -X POST -H "Authorization: token ${{ secrets.MY_GITHUB_TOKEN }}" \
             -H "Content-Type: application/json" \
             -d "{\"body\": \"$COMMENT\"}" \
