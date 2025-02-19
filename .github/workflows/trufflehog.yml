@@ -1,4 +1,4 @@
-            name: trufflehog
+name: trufflehog
 on:
   pull_request:  # Ensures the workflow has access to the PR number
   workflow_dispatch:
