@@ -1,7 +1,6 @@
 name: trufflehog
 on:
-  pull_request:
-  push:
+  pull_request:  # Ensures the workflow has access to the PR number
   workflow_dispatch:
 
 jobs:
@@ -9,23 +8,9 @@ jobs:
     name: trufflehog
     runs-on: ubuntu-latest
     steps:
-      - name: Determine Fetch Depth
-        shell: bash
-        run: |
-          if [ "${{ github.event_name }}" == "push" ]; then
-            echo "depth=$(($(jq length <<< '${{ toJson(github.event.commits) }}') + 2))" >> $GITHUB_ENV
-            echo "branch=${{ github.ref_name }}" >> $GITHUB_ENV
-          fi
-          if [ "${{ github.event_name }}" == "pull_request" ]; then
-            echo "depth=$((${{ github.event.pull_request.commits }}+2))" >> $GITHUB_ENV
-            echo "branch=${{ github.event.pull_request.head.ref }}" >> $GITHUB_ENV
-          fi
-
-      - name: Checkout with Shallow Cloning
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
-          ref: ${{ env.branch }}
-          fetch-depth: ${{ env.depth }}
+          fetch-depth: 0
 
       - name: Install TruffleHog
         run: |
@@ -33,7 +18,7 @@ jobs:
 
       - name: Run TruffleHog Secret Scan
         run: |
-          trufflehog --regex --entropy=True --results=verified,unknown . | tee trufflehog_output.txt
+          trufflehog --regex --entropy=True https://github.com/${{ github.repository }} | tee trufflehog_output.txt
           if grep -q "Reason" trufflehog_output.txt; then
             echo "🚨 Secrets detected by TruffleHog!"
             exit 1
@@ -53,4 +38,4 @@ jobs:
             -d "{\"body\": \"$COMMENT\"}" \
             "https://api.github.com/repos/${{ github.repository }}/issues/${PR_NUMBER}/comments"
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.MY_GITHUB_TOKEN }}
