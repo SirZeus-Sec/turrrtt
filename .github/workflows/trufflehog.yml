@@ -25,13 +25,14 @@ jobs:
             echo "files=" >> $GITHUB_ENV
           else
             echo "Changed files: $FILES"
-            echo "files=$FILES" >> $GITHUB_ENV
+            echo "files=$(echo "$FILES" | tr '\n' ' ')" >> $GITHUB_ENV  # Convert to space-separated string
           fi
 
       - name: Run TruffleHog on Changed Files
         if: env.files != ''
         run: |
-          trufflehog --regex --entropy=True $files | tee trufflehog_output.txt
+          echo "Scanning files: $files"
+          trufflehog --regex --entropy=True --path $files | tee trufflehog_output.txt
           if grep -q "Reason" trufflehog_output.txt; then
             echo "🚨 Secrets detected by TruffleHog!"
             exit 1
