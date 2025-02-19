@@ -14,7 +14,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          
+
       - name: Install TruffleHog
         run: |
           pip install trufflehog
@@ -22,6 +22,10 @@ jobs:
       - name: Run TruffleHog Secret Scan
         run: |
           trufflehog --regex --entropy=True https://github.com/${{ github.repository }} | tee trufflehog_output.txt
+          if grep -q "Reason" trufflehog_output.txt; then
+            echo "🚨 Secrets detected by TruffleHog!"
+            exit 1  # Fail the workflow if secrets are found
+          fi
 
       - name: Post TruffleHog Results as PR Comment
         if: failure()
