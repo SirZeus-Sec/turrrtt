@@ -30,12 +30,8 @@ jobs:
       - name: Run TruffleHog on Changed Files
         if: env.files != ''
         run: |
-          echo "Scanning changed files: $files"
-          trufflehog filesystem --path $files --only-verified | tee trufflehog_output.txt
-          if grep -q "Reason" trufflehog_output.txt; then
-            echo "🚨 Secrets detected by TruffleHog!"
-            exit 1
-          fi
+         
+         trufflehog --regex --entropy=True https://github.com/${{ github.repository }}
 
       - name: Post TruffleHog Results as PR Comment
         if: failure()
