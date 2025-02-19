@@ -1,6 +1,6 @@
 name: trufflehog
 on:
-  pull_request:
+  pull_request_target:  # Allows commenting on PRs
   push:
 
 jobs:
@@ -30,8 +30,11 @@ jobs:
       - name: Run TruffleHog on Changed Files
         if: env.files != ''
         run: |
-         
-         trufflehog --regex --entropy=True https://github.com/${{ github.repository }}
+          trufflehog filesystem --path $files --only-verified | tee trufflehog_output.txt
+          if grep -q "Reason" trufflehog_output.txt; then
+            echo "🚨 Secrets detected by TruffleHog!"
+            exit 1
+          fi
 
       - name: Post TruffleHog Results as PR Comment
         if: failure()
@@ -42,9 +45,9 @@ jobs:
             echo "No PR number found. Skipping comment."
             exit 0
           fi
-          curl -s -X POST -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+          curl -s -X POST -H "Authorization: token ${{ secrets.PAT }}" \
             -H "Content-Type: application/json" \
             -d "{\"body\": \"$COMMENT\"}" \
             "https://api.github.com/repos/${{ github.repository }}/issues/${PR_NUMBER}/comments"
         env:
-          GITHUB_TOKEN: ${{ secrets.MY_GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.PAT }}
