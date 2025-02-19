@@ -13,26 +13,52 @@ jobs:
           fetch-depth: 0
 
       - name: Install TruffleHog
+        run: pip install trufflehog jq
+
+      - name: Get Changed Files
+        id: changed_files
         run: |
-          pip install trufflehog
+          CHANGED_FILES=$(jq -r '.pull_request.base.repo.full_name as $repo | .pull_request.number as $pr | .pull_request.head.sha as $sha | "https://api.github.com/repos/\($repo)/pulls/\($pr)/files" | @sh' "$GITHUB_EVENT_PATH" | xargs curl -s | jq -r '.[].filename')
+          echo "Changed files: $CHANGED_FILES"
+          echo "CHANGED_FILES<<EOF" >> $GITHUB_ENV
+          echo "$CHANGED_FILES" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
 
       - name: Run TruffleHog Secret Scan
         run: |
-          trufflehog --regex --entropy=True --json https://github.com/${{ github.repository }} > trufflehog_output.json
-          if jq -e '.found' trufflehog_output.json > /dev/null; then
+          FOUND_SECRETS=""
+          for file in $CHANGED_FILES; do
+            echo "Scanning file: $file"
+            OUTPUT=$(trufflehog --regex --entropy=True --json "$file" 2>/dev/null || true)
+            if [ -n "$OUTPUT" ]; then
+              FOUND_SECRETS+="$OUTPUT\n"
+            fi
+          done
+          
+          if [ -n "$FOUND_SECRETS" ]; then
             echo "🚨 Secrets detected by TruffleHog!"
+            echo "$FOUND_SECRETS" > trufflehog_output.json
+            echo "FOUND_SECRETS=true" >> $GITHUB_ENV
             exit 1
           fi
 
       - name: Post TruffleHog Results as PR Comment
         if: failure()
         run: |
-          COMMENT="🚨 TruffleHog found secrets in this PR! Please check the logs."
           PR_NUMBER=$(jq --raw-output .pull_request.number "$GITHUB_EVENT_PATH")
           if [[ -z "$PR_NUMBER" || "$PR_NUMBER" == "null" ]]; then
             echo "No PR number found. Skipping comment."
             exit 0
           fi
+
+          # Format detected secrets
+          COMMENT="🚨 **TruffleHog found secrets in this PR!**\n\n"
+          COMMENT+="🔍 **Details:**\n"
+          
+          while IFS= read -r line; do
+            COMMENT+="\`\`\`\n$line\n\`\`\`\n"
+          done < trufflehog_output.json
+          
           curl -s -X POST -H "Authorization: token ${{ secrets.MY_GITHUB_TOKEN }}" \
             -H "Content-Type: application/json" \
             -d "{\"body\": \"$COMMENT\"}" \
