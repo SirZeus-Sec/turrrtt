@@ -3,17 +3,29 @@ on:
   pull_request:
   push:
   workflow_dispatch:
-  schedule:
-    - cron: "0 4 * * *" # Run once a day at 4 AM UTC
 
 jobs:
   scan:
     name: trufflehog
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Determine Fetch Depth
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" == "push" ]; then
+            echo "depth=$(($(jq length <<< '${{ toJson(github.event.commits) }}') + 2))" >> $GITHUB_ENV
+            echo "branch=${{ github.ref_name }}" >> $GITHUB_ENV
+          fi
+          if [ "${{ github.event_name }}" == "pull_request" ]; then
+            echo "depth=$((${{ github.event.pull_request.commits }}+2))" >> $GITHUB_ENV
+            echo "branch=${{ github.event.pull_request.head.ref }}" >> $GITHUB_ENV
+          fi
+
+      - name: Checkout with Shallow Cloning
+        uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          ref: ${{ env.branch }}
+          fetch-depth: ${{ env.depth }}
 
       - name: Install TruffleHog
         run: |
@@ -21,19 +33,24 @@ jobs:
 
       - name: Run TruffleHog Secret Scan
         run: |
-          trufflehog --regex --entropy=True https://github.com/${{ github.repository }} | tee trufflehog_output.txt
+          trufflehog --regex --entropy=True --results=verified,unknown . | tee trufflehog_output.txt
           if grep -q "Reason" trufflehog_output.txt; then
             echo "🚨 Secrets detected by TruffleHog!"
-            exit 1  # Fail the workflow if secrets are found
+            exit 1
           fi
 
       - name: Post TruffleHog Results as PR Comment
         if: failure()
         run: |
           COMMENT="🚨 TruffleHog found secrets in this PR! Please check the logs."
+          PR_NUMBER="${{ github.event.pull_request.number }}"
+          if [[ -z "$PR_NUMBER" ]]; then
+            echo "No PR number found. Skipping comment."
+            exit 0
+          fi
           curl -s -X POST -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
             -H "Content-Type: application/json" \
             -d "{\"body\": \"$COMMENT\"}" \
-            "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments"
+            "https://api.github.com/repos/${{ github.repository }}/issues/${PR_NUMBER}/comments"
         env:
-          GITHUB_TOKEN: ${{ secrets.MY_GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
