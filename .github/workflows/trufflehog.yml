@@ -14,11 +14,29 @@ jobs:
 
       - name: Install TruffleHog
         run: |
-          pip install trufflehog
+          pip install trufflehog jq
 
-      - name: Run TruffleHog Secret Scan
+      - name: Get Changed Files
+        id: changed_files
         run: |
-          trufflehog --regex --entropy=True --json https://github.com/${{ github.repository }} > trufflehog_output.json
+          CHANGED_FILES=$(curl -s -H "Authorization: token ${{ secrets.MY_GITHUB_TOKEN }}" \
+            "https://api.github.com/repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
+            | jq -r '.[].filename')
+
+          if [[ -z "$CHANGED_FILES" ]]; then
+            echo "No changed files detected."
+            exit 0
+          fi
+
+          echo "CHANGED_FILES=${CHANGED_FILES}" >> $GITHUB_ENV
+
+      - name: Run TruffleHog Secret Scan on Changed Files
+        run: |
+          for file in $CHANGED_FILES; do
+            echo "Scanning $file..."
+            trufflehog --regex --entropy=True --json "$file" | tee -a trufflehog_output.json
+          done
+
           if jq -e '.found' trufflehog_output.json > /dev/null; then
             echo "🚨 Secrets detected by TruffleHog!"
             exit 1
@@ -29,10 +47,12 @@ jobs:
         run: |
           COMMENT="🚨 TruffleHog found secrets in this PR! Please check the logs."
           PR_NUMBER=$(jq --raw-output .pull_request.number "$GITHUB_EVENT_PATH")
+
           if [[ -z "$PR_NUMBER" || "$PR_NUMBER" == "null" ]]; then
             echo "No PR number found. Skipping comment."
             exit 0
           fi
+
           curl -s -X POST -H "Authorization: token ${{ secrets.MY_GITHUB_TOKEN }}" \
             -H "Content-Type: application/json" \
             -d "{\"body\": \"$COMMENT\"}" \
