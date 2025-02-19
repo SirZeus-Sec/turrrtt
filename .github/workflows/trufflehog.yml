@@ -23,22 +23,30 @@ jobs:
           pip install trufflehog
 
       # ✅ Run TruffleHog only on changed files
-      - name: Run TruffleHog Secret Scan on Changed Files
+      - name: Run TruffleHog on Changed Files
         run: |
           files="${{ steps.changed-files.outputs.all_changed_files }}"
           if [ -z "$files" ]; then
             echo "No changed files detected. Skipping scan."
             exit 0
           fi
-          echo "Scanning changed files: $files"
-          trufflehog --regex --entropy=True --json $files > trufflehog_output.json || true
 
-          # ✅ Check if secrets were found
-          if jq -e '.[].Reason' trufflehog_output.json > /dev/null; then
-            echo "🚨 Secrets detected by TruffleHog!"
+          # ✅ Scan each changed file separately
+          found_secrets=false
+          for file in $files; do
+            echo "Scanning: $file"
+            trufflehog --regex --entropy=True --json "$file" > "trufflehog_output.json" || true
+            
+            # ✅ Check if secrets were found in the file
+            if jq -e '.[].Reason' trufflehog_output.json > /dev/null; then
+              echo "🚨 Secrets detected in $file!"
+              found_secrets=true
+            fi
+          done
+
+          if [ "$found_secrets" = true ]; then
             echo "secrets_found=true" >> $GITHUB_ENV
           else
-            echo "✅ No secrets found."
             echo "secrets_found=false" >> $GITHUB_ENV
           fi
 
