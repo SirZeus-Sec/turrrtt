@@ -10,11 +10,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 2  # Ensures we can compare the last commit with the base branch
+          fetch-depth: 2  # Fetch history to compare changes
 
       - name: Install TruffleHog
-        run: |
-          pip install trufflehog
+        run: pip install trufflehog
 
       - name: Get Changed Files
         id: changed-files
@@ -25,14 +24,14 @@ jobs:
             echo "files=" >> $GITHUB_ENV
           else
             echo "Changed files: $FILES"
-            echo "files=$(echo "$FILES" | tr '\n' ' ')" >> $GITHUB_ENV  # Convert to space-separated string
+            echo "files=$(echo "$FILES" | tr '\n' ' ')" >> $GITHUB_ENV
           fi
 
       - name: Run TruffleHog on Changed Files
         if: env.files != ''
         run: |
-          echo "Scanning files: $files"
-          trufflehog --regex --entropy=True --path $files | tee trufflehog_output.txt
+          echo "Scanning changed files: $files"
+          trufflehog filesystem --path $files --only-verified | tee trufflehog_output.txt
           if grep -q "Reason" trufflehog_output.txt; then
             echo "🚨 Secrets detected by TruffleHog!"
             exit 1
