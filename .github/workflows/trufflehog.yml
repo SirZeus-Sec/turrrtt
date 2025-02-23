@@ -1,28 +1,31 @@
-name: trufflehog
+name: TruffleHog PR Scanner
 on:
-  pull_request:  # Ensures the workflow has access to the PR number
+  pull_request:
+    types: [opened, synchronize, reopened]
   workflow_dispatch:
 
 jobs:
   scan:
-    name: trufflehog
+    name: Run TruffleHog on PR Changes
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
-      - name: Install TruffleHog
-        run: |
-          pip install trufflehog
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Ensures we have full commit history
 
       - name: Run TruffleHog Secret Scan
-        run: |
-          trufflehog --regex --entropy=True https://github.com/${{ github.repository }} | tee trufflehog_output.txt
-          if grep -q "Reason" trufflehog_output.txt; then
-            echo "🚨 Secrets detected by TruffleHog!"
-            exit 1
-          fi
+        uses: trufflesecurity/trufflehog@v3
+        with:
+          path: "./"
+          base: "${{ github.event.repository.default_branch }}"  # Base branch (e.g., main)
+          head: "HEAD"  # PR branch
+          extra_args: "--only-verified --debug"
 
       - name: Post TruffleHog Results as PR Comment
         if: failure()
