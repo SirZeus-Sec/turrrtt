@@ -38,20 +38,20 @@ jobs:
             exit 0
           fi
 
-      - name: Run TruffleHog on Changed Files
+      - name: Run TruffleHog v3 on Changed Files
         id: run_trufflehog
         continue-on-error: true
         run: |
           echo "🚀 Running TruffleHog v3 on PR changes..."
           while read -r file; do
             echo "Scanning file: $file"
-            trufflehog filesystem --entropy=True --json --path "$file" | tee -a trufflehog_output.json
+            trufflehog filesystem --only-verified --json "$file" | tee -a trufflehog_output.json
           done < changed_files.txt
 
           echo "🔍 TruffleHog output:"
           cat trufflehog_output.json
 
-          if grep -q "Reason" trufflehog_output.json; then
+          if grep -q "DetectorName" trufflehog_output.json; then
             echo "🚨 Secrets detected!"
             exit 1
           fi
