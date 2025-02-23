@@ -1,40 +1,52 @@
-name: PR Secret Scanner
+name: trufflehog
 
 on:
   pull_request:
-    types: [opened, synchronize]
+    types: [opened, synchronize]  # Runs only on new PRs and updates
   issue_comment:
-    types: [created]
+    types: [created]  # Runs when a new comment is added
+  workflow_dispatch:  # Manual trigger option
 
 permissions:
   contents: read
   pull-requests: write  # ✅ Allows commenting on PRs
 
 jobs:
-  trufflehog_scan:
-    name: Secret Scan with TruffleHog
+  scan:
+    name: trufflehog
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 1  # ✅ Scan only new changes in the PR
+          fetch-depth: 2  # ✅ Fetches only the last two commits for diff scanning
 
-      - name: Run TruffleHog on PR Changes
-        id: trufflehog
-        continue-on-error: true  # ✅ Prevents stopping the workflow
-        uses: haydz/trufflehog-actions-scan@master  # 🔹 Fixed version
-        with:
-          scanArguments: "--regex --entropy=False --json --max_depth=1"
+      - name: Install TruffleHog
+        run: pip install trufflehog
+
+      - name: Run TruffleHog Secret Scan on New PR Changes
+        id: trufflehog_scan
+        continue-on-error: true  # ✅ Ensures the job doesn't stop if secrets are found
+        run: |
+          git fetch origin ${{ github.base_ref }} --depth=1
+          trufflehog --regex --entropy=True --json $(git diff --name-only origin/${{ github.base_ref }}) | tee trufflehog_output.json
+          if grep -q "Reason" trufflehog_output.json; then
+            echo "🚨 Secrets detected by TruffleHog!"
+            exit 1
+          fi
 
       - name: Post Comment on PR if Secrets Found
         if: failure()
         env:
-          GITHUB_TOKEN: ${{ secrets.MY_GITHUB_TOKEN }}
-          PR_URL: ${{ github.event.pull_request.html_url }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           COMMENT="🚨 TruffleHog found secrets in this PR! Please check the logs."
+          PR_NUMBER="${{ github.event.pull_request.number }}"
+          if [[ -z "$PR_NUMBER" ]]; then
+            echo "No PR number found. Skipping comment."
+            exit 0
+          fi
           curl -s -X POST -H "Authorization: token $GITHUB_TOKEN" \
-               -H "Accept: application/vnd.github.v3+json" \
-               https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments \
-               -d "{\"body\": \"$COMMENT\"}"
+            -H "Accept: application/vnd.github.v3+json" \
+            -d "{\"body\": \"$COMMENT\"}" \
+            "https://api.github.com/repos/${{ github.repository }}/issues/${PR_NUMBER}/comments"
