@@ -1,65 +1,76 @@
-name: trufflehog
+name: TruffleHog PR Scanner
 
 on:
   pull_request:
-    types: [opened, synchronize]  # Runs when a new PR is opened or updated
-  workflow_dispatch:  # Allows manual trigger
+    types: [opened, synchronize]
+  workflow_dispatch:
 
 permissions:
   contents: read
-  pull-requests: write  # Enables posting comments on the PR
+  pull-requests: write  
 
 jobs:
-  scan:
-    name: trufflehog
+  trufflehog_scan:
+    name: Run TruffleHog on New PR Changes
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Use full history so we have both base and head commit data
+          fetch-depth: 2  
+
+      - name: Debug - Show PR Base Branch and Head Commit
+        run: |
+          echo "Base branch: ${{ github.base_ref }}"
+          echo "PR head commit: ${{ github.sha }}"
+          git log --oneline -n 5  
+
+      - name: Get Changed Files in PR
+        id: changed_files
+        run: |
+          git fetch origin ${{ github.base_ref }} --depth=1
+          echo "🔍 Checking changed files..."
+          git diff --name-only origin/${{ github.base_ref }} > changed_files.txt
+          
+          echo "Files detected in this PR:"
+          cat changed_files.txt
+
+          if [ ! -s changed_files.txt ]; then
+            echo "⚠️ No changed files detected. Exiting."
+            exit 0
+          fi
 
       - name: Install TruffleHog
         run: pip install trufflehog
 
-      - name: Get Changed Files from PR
-        id: changed_files
-        run: |
-          echo "Base SHA: ${{ github.event.pull_request.base.sha }}"
-          echo "Head SHA: ${{ github.event.pull_request.head.sha }}"
-          # List only files changed between the base and head commits
-          git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} > changed_files.txt
-          echo "Changed files:"
-          cat changed_files.txt
-
       - name: Run TruffleHog on Changed Files
         id: run_trufflehog
+        continue-on-error: true
         run: |
-          rm -f combined_output.json || true
-          touch combined_output.json
-          while IFS= read -r file; do
+          echo "🚀 Running TruffleHog on PR changes..."
+          git diff --name-only origin/${{ github.base_ref }} > changed_files.txt
+          
+          # Run TruffleHog on only the changed files
+          while read -r file; do
             echo "Scanning file: $file"
-            # Run in filesystem mode on each file individually.
-            trufflehog filesystem --regex --entropy=True --json "$file" >> combined_output.json || true
+            trufflehog --regex --entropy=True --json --repo_path . --path "$file" | tee -a trufflehog_output.json
           done < changed_files.txt
-          echo "Combined TruffleHog Output:"
-          cat combined_output.json
-          if grep -q "Reason" combined_output.json; then
-            echo "🚨 Secrets detected by TruffleHog!"
+
+          echo "🔍 TruffleHog output:"
+          cat trufflehog_output.json
+
+          if grep -q "Reason" trufflehog_output.json; then
+            echo "🚨 Secrets detected!"
             exit 1
           fi
 
-      - name: Post PR Comment if Secrets Detected
+      - name: Post Comment if Secrets Found
         if: failure()
         env:
           GITHUB_TOKEN: ${{ secrets.MY_GITHUB_TOKEN }}
         run: |
           COMMENT="🚨 TruffleHog found secrets in this PR! Please check the logs."
           PR_NUMBER="${{ github.event.pull_request.number }}"
-          if [[ -z "$PR_NUMBER" ]]; then
-            echo "No PR number found. Skipping comment."
-            exit 0
-          fi
           curl -s -X POST -H "Authorization: token $GITHUB_TOKEN" \
             -H "Accept: application/vnd.github.v3+json" \
             -d "{\"body\": \"$COMMENT\"}" \
