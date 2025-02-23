@@ -19,48 +19,11 @@ jobs:
         with:
           fetch-depth: 2  
 
-      - name: Debug - Show PR Base Branch and Head Commit
+      - name: Run TruffleHog Secret Scan
         run: |
-          echo "Base branch: ${{ github.base_ref }}"
-          echo "PR head commit: ${{ github.sha }}"
-          git log --oneline -n 5  
-
-      - name: Get Changed Files in PR
-        id: changed_files
-        run: |
-          git fetch origin ${{ github.base_ref }} --depth=1
-          echo "🔍 Checking changed files..."
-          git diff --name-only origin/${{ github.base_ref }} > changed_files.txt
-          
-          echo "Files detected in this PR:"
-          cat changed_files.txt
-
-          if [ ! -s changed_files.txt ]; then
-            echo "⚠️ No changed files detected. Exiting."
-            exit 0
-          fi
-
-      - name: Install TruffleHog
-        run: pip install trufflehog
-
-      - name: Run TruffleHog on Changed Files
-        id: run_trufflehog
-        continue-on-error: true
-        run: |
-          echo "🚀 Running TruffleHog on PR changes..."
-          git diff --name-only origin/${{ github.base_ref }} > changed_files.txt
-          
-          # Run TruffleHog on only the changed files
-          while read -r file; do
-            echo "Scanning file: $file"
-            trufflehog --regex --entropy=True --json --repo_path . --path "$file" | tee -a trufflehog_output.json
-          done < changed_files.txt
-
-          echo "🔍 TruffleHog output:"
-          cat trufflehog_output.json
-
-          if grep -q "Reason" trufflehog_output.json; then
-            echo "🚨 Secrets detected!"
+          trufflehog --regex --entropy=True https://github.com/${{ github.repository }} | tee trufflehog_output.txt
+          if grep -q "Reason" trufflehog_output.txt; then
+            echo "🚨 Secrets detected by TruffleHog!"
             exit 1
           fi
 
