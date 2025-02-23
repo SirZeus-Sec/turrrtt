@@ -1,28 +1,32 @@
-name: trufflehog
+name: TruffleHog PR Scanner
 on:
-  pull_request:  # Ensures the workflow has access to the PR number
+  pull_request:
+    types: [opened, synchronize, reopened]
+
   workflow_dispatch:
 
 jobs:
   scan:
-    name: trufflehog
+    name: Run TruffleHog on PR Changes
     runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      pull-requests: write
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout Repository
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Install TruffleHog
-        run: |
-          pip install trufflehog
-
       - name: Run TruffleHog Secret Scan
-        run: |
-          trufflehog --regex --entropy=True https://github.com/${{ github.repository }} | tee trufflehog_output.txt
-          if grep -q "Reason" trufflehog_output.txt; then
-            echo "🚨 Secrets detected by TruffleHog!"
-            exit 1
-          fi
+        uses: trufflesecurity/trufflehog-actions@v3
+        with:
+          path: "./"
+          base: "${{ github.event.repository.default_branch }}"
+          head: "HEAD"
+          extra_args: "--only-verified --debug"
 
       - name: Post TruffleHog Results as PR Comment
         if: failure()
@@ -33,9 +37,7 @@ jobs:
             echo "No PR number found. Skipping comment."
             exit 0
           fi
-          curl -s -X POST -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+          curl -s -X POST -H "Authorization: token ${{ secrets.MY_GITHUB_TOKEN }}" \
             -H "Content-Type: application/json" \
             -d "{\"body\": \"$COMMENT\"}" \
             "https://api.github.com/repos/${{ github.repository }}/issues/${PR_NUMBER}/comments"
-        env:
-          GITHUB_TOKEN: ${{ secrets.MY_GITHUB_TOKEN }}
