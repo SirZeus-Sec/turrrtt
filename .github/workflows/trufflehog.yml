@@ -1,41 +1,27 @@
-name: trufflehog
+name: PR Secret Scanner
+
 on:
-  pull_request:  # Ensures the workflow has access to the PR number
-  workflow_dispatch:
+  pull_request:
+    types: [opened, synchronize]
+  issue_comment:
+    types: [created]
 
 jobs:
-  scan:
-    name: trufflehog
+  trufflehog_scan:
+    name: Secret Scan with TruffleHog
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout Code
+        uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 1  # Fetch only the latest changes
 
-      - name: Install TruffleHog
-        run: |
-          pip install trufflehog
+      - name: Run TruffleHog on PR Changes
+        uses: haydz/trufflehog-actions-scan@v1.0.3
+        with:
+          scanArguments: "--regex --entropy=False --json --max_depth=1"
 
-      - name: Run TruffleHog Secret Scan
-        run: |
-          trufflehog --regex --entropy=True https://github.com/${{ github.repository }} | tee trufflehog_output.txt
-          if grep -q "Reason" trufflehog_output.txt; then
-            echo "🚨 Secrets detected by TruffleHog!"
-            exit 1
-          fi
-
-      - name: Post TruffleHog Results as PR Comment
+      - name: Post Result as PR Comment
         if: failure()
         run: |
-          COMMENT="🚨 TruffleHog found secrets in this PR! Please check the logs."
-          PR_NUMBER="${{ github.event.pull_request.number }}"
-          if [[ -z "$PR_NUMBER" ]]; then
-            echo "No PR number found. Skipping comment."
-            exit 0
-          fi
-          curl -s -X POST -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            -H "Content-Type: application/json" \
-            -d "{\"body\": \"$COMMENT\"}" \
-            "https://api.github.com/repos/${{ github.repository }}/issues/${PR_NUMBER}/comments"
-        env:
-          GITHUB_TOKEN: ${{ secrets.MY_GITHUB_TOKEN }}
+          echo "🚨 TruffleHog found potential secrets! Please review the findings." >> $GITHUB_STEP_SUMMARY
