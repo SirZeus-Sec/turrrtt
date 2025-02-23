@@ -2,14 +2,12 @@ name: trufflehog
 
 on:
   pull_request:
-    types: [opened, synchronize]  # Runs only on new PRs and updates
-  issue_comment:
-    types: [created]  # Runs when a new comment is added
-  workflow_dispatch:  # Manual trigger option
+    types: [opened, synchronize]  # Runs only when a new PR is created or updated
+  workflow_dispatch:  # Allows manual trigger
 
 permissions:
   contents: read
-  pull-requests: write  # ✅ Allows commenting on PRs
+  pull-requests: write  # ✅ Allows posting PR comments
 
 jobs:
   scan:
@@ -28,8 +26,21 @@ jobs:
         id: trufflehog_scan
         continue-on-error: true  # ✅ Ensures the job doesn't stop if secrets are found
         run: |
-          git fetch origin ${{ github.base_ref }} --depth=1
-          trufflehog --regex --entropy=True --json $(git diff --name-only origin/${{ github.base_ref }}) | tee trufflehog_output.json
+          # Get the base branch of the PR
+          BASE_BRANCH="origin/${{ github.base_ref }}"
+          git fetch $BASE_BRANCH --depth=1
+          
+          # Scan only the files changed in the PR
+          git diff --name-only $BASE_BRANCH > changed_files.txt
+          if [ ! -s changed_files.txt ]; then
+            echo "No changed files detected. Exiting."
+            exit 0
+          fi
+          
+          # Run TruffleHog only on changed files
+          trufflehog --regex --entropy=True --json $(cat changed_files.txt) | tee trufflehog_output.json
+          
+          # Fail the PR if secrets are found
           if grep -q "Reason" trufflehog_output.json; then
             echo "🚨 Secrets detected by TruffleHog!"
             exit 1
@@ -46,7 +57,7 @@ jobs:
             echo "No PR number found. Skipping comment."
             exit 0
           fi
-          curl -s -X POST -H "Authorization: token $MY_GITHUB_TOKEN" \
+          curl -s -X POST -H "Authorization: token $GITHUB_TOKEN" \
             -H "Accept: application/vnd.github.v3+json" \
             -d "{\"body\": \"$COMMENT\"}" \
             "https://api.github.com/repos/${{ github.repository }}/issues/${PR_NUMBER}/comments"
