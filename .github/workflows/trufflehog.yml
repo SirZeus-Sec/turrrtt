@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   trufflehog_scan:
-    name: Run TruffleHog on New PR Changes
+    name: Run TruffleHog on PR Changes
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
@@ -19,42 +19,13 @@ jobs:
         with:
           fetch-depth: 2  
 
-      - name: Install TruffleHog v3 (Latest)
-        run: |
-          pip install --upgrade trufflehog
-
-      - name: Get Changed Files in PR
-        id: changed_files
-        run: |
-          git fetch origin ${{ github.base_ref }} --depth=1
-          echo "🔍 Checking changed files..."
-          git diff --name-only origin/${{ github.base_ref }} > changed_files.txt
-
-          echo "Files detected in this PR:"
-          cat changed_files.txt
-
-          if [ ! -s changed_files.txt ]; then
-            echo "⚠️ No changed files detected. Exiting."
-            exit 0
-          fi
-
-      - name: Run TruffleHog v3 on Changed Files
-        id: run_trufflehog
-        continue-on-error: true
-        run: |
-          echo "🚀 Running TruffleHog v3 on PR changes..."
-          while read -r file; do
-            echo "Scanning file: $file"
-            trufflehog filesystem --only-verified --json "$file" | tee -a trufflehog_output.json
-          done < changed_files.txt
-
-          echo "🔍 TruffleHog output:"
-          cat trufflehog_output.json
-
-          if grep -q "DetectorName" trufflehog_output.json; then
-            echo "🚨 Secrets detected!"
-            exit 1
-          fi
+      - name: Run TruffleHog GitHub Action
+        uses: trufflesecurity/trufflehog@v3
+        with:
+          path: ./
+          base: "${{ github.event.repository.default_branch }}"
+          head: HEAD
+          extra_args: --debug --only-verified
 
       - name: Post Comment if Secrets Found
         if: failure()
