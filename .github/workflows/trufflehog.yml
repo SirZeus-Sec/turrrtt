@@ -2,7 +2,6 @@ name: TruffleHog PR Scanner
 on:
   pull_request:
     types: [opened, synchronize, reopened]
-
   workflow_dispatch:
 
 jobs:
@@ -27,17 +26,3 @@ jobs:
           base: "${{ github.event.repository.default_branch }}"
           head: "HEAD"
           extra_args: "--only-verified --debug"
-
-      - name: Post TruffleHog Results as PR Comment
-        if: failure()
-        run: |
-          COMMENT="🚨 TruffleHog found secrets in this PR! Please check the logs."
-          PR_NUMBER="${{ github.event.pull_request.number }}"
-          if [[ -z "$PR_NUMBER" ]]; then
-            echo "No PR number found. Skipping comment."
-            exit 0
-          fi
-          curl -s -X POST -H "Authorization: token ${{ secrets.MY_GITHUB_TOKEN }}" \
-            -H "Content-Type: application/json" \
-            -d "{\"body\": \"$COMMENT\"}" \
-            "https://api.github.com/repos/${{ github.repository }}/issues/${PR_NUMBER}/comments"
