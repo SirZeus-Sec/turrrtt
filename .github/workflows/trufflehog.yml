@@ -1,40 +1,69 @@
-name: TruffleHog PR Scanner
+name: PR Secret Scanner
 
 on:
   pull_request:
-    types: [opened, synchronize]
-  workflow_dispatch:
+    types: [opened, synchronize, reopened]
+  issue_comment:
+    types: [created]
 
 permissions:
   contents: read
-  pull-requests: write  
+  pull-requests: write
+  issues: write
 
 jobs:
   trufflehog_scan:
     name: Run TruffleHog on PR Changes
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout Code
+      - name: Checkout Repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 2  
+          fetch-depth: 0  # Ensures we get the full history for diff
 
-      - name: Run TruffleHog GitHub Action
-        uses: trufflesecurity/trufflehog@v3
-        with:
-          path: ./
-          base: "${{ github.event.repository.default_branch }}"
-          head: HEAD
-          extra_args: --debug --only-verified
+      - name: Install TruffleHog
+        run: pip install trufflehog
 
-      - name: Post Comment if Secrets Found
+      - name: Get Changed Files
+        id: changed_files
+        run: |
+          git fetch origin ${{ github.event.repository.default_branch }} --depth=1
+          git diff --name-only origin/${{ github.event.repository.default_branch }} HEAD > changed_files.txt
+          cat changed_files.txt
+
+      - name: Run TruffleHog on Changed Files
+        run: |
+          echo "🚀 Running TruffleHog on PR changes..."
+          rm -f trufflehog_output.json || true
+          
+          while read -r file; do
+            echo "Scanning file: $file"
+            trufflehog filesystem --json --path "$file" --entropy=True | tee -a trufflehog_output.json
+          done < changed_files.txt
+
+          echo "🔍 TruffleHog output:"
+          cat trufflehog_output.json
+          
+          if grep -q "Reason" trufflehog_output.json; then
+            echo "🚨 Secrets detected!"
+            exit 1
+          fi
+
+      - name: Comment on PR if Secrets Found
         if: failure()
-        env:
-          GITHUB_TOKEN: ${{ secrets.MY_GITHUB_TOKEN }}
         run: |
           COMMENT="🚨 TruffleHog found secrets in this PR! Please check the logs."
           PR_NUMBER="${{ github.event.pull_request.number }}"
-          curl -s -X POST -H "Authorization: token $GITHUB_TOKEN" \
-            -H "Accept: application/vnd.github.v3+json" \
+          
+          if [[ -z "$PR_NUMBER" ]]; then
+            echo "No PR number found. Skipping comment."
+            exit 0
+          fi
+          
+          curl -s -X POST -H "Authorization: token ${{ secrets.MY_GITHUB_TOKEN }}" \
+            -H "Content-Type: application/json" \
             -d "{\"body\": \"$COMMENT\"}" \
             "https://api.github.com/repos/${{ github.repository }}/issues/${PR_NUMBER}/comments"
+        env:
+          GITHUB_TOKEN: ${{ secrets.MY_GITHUB_TOKEN }}
