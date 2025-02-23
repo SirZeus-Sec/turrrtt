@@ -19,9 +19,11 @@ jobs:
         with:
           fetch-depth: 2  
 
-      - name: Install TruffleHog v3 (Latest)
+      - name: Install TruffleHog v3 (Correctly)
         run: |
-          pip install --upgrade trufflehog
+          python3 -m pip install --upgrade pip
+          pip install trufflehog==3.42.0  # Ensure latest v3 version
+          trufflehog --version  # Verify installation
 
       - name: Get Changed Files in PR
         id: changed_files
