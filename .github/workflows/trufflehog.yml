@@ -23,7 +23,7 @@ jobs:
       - name: Run TruffleHog on PR Changes
         id: trufflehog
         continue-on-error: true  # ✅ Prevents stopping the workflow
-        uses: haydz/trufflehog-actions-scan@v1.0.3
+        uses: haydz/trufflehog-actions-scan@master  # 🔹 Fixed version
         with:
           scanArguments: "--regex --entropy=False --json --max_depth=1"
 
