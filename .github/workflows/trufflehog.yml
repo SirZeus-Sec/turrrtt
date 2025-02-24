@@ -1,60 +1,51 @@
-name: TruffleHog Secrets Scan
-on: [pull_request]
+name: Test
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+  id-token: write
+  issues: write
+  pull-requests: write
 
 jobs:
   TruffleHog:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: TruffleHog OSS
+      - name: Run TruffleHog Secret Scan
         id: trufflehog
-        uses: trufflesecurity/trufflehog@main
+        uses: trufflesecurity/trufflehog@v3.88.12
+        continue-on-error: true
         with:
           path: ./
-          base: ${{ github.event.pull_request.base.sha }}
-          head: ${{ github.event.pull_request.head.sha }}
+          base: "${{ github.event.repository.default_branch }}"
+          head: HEAD
           extra_args: --debug --only-verified
 
-      - name: Comment on PR if secrets are found
-        if: steps.trufflehog.outputs.findings
-        uses: actions/github-script@v6
-        with:
-          script: |
-            const { data: comments } = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-            });
+      - name: Post TruffleHog Results as PR Comment (If Secrets Found)
+        if: failure()
+        run: |
+          PR_NUMBER="${{ github.event.pull_request.number }}"
+          COMMENT="🚨 **TruffleHog found secrets in this PR!** 🚨 Please check the logs."
+          curl -s -X POST -H "Authorization: token ${{ secrets.MY_GITHUB_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d "{\"body\": \"$COMMENT\"}" \
+            "https://api.github.com/repos/${{ github.repository }}/issues/${PR_NUMBER}/comments"
+        env:
+          GITHUB_TOKEN: ${{ secrets.MY_GITHUB_TOKEN }}
 
-            const hasExistingComment = comments.some(comment => comment.body.includes("TruffleHog found secrets in the following files:"));
-
-            if (!hasExistingComment) {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number,
-                body: `🚨 TruffleHog found secrets in the following files:\n\n${
-                  steps.trufflehog.outputs.findings
-                }\n\nPlease remove these secrets before merging.`,
-              });
-            }
-
-      - name: Add success message if no issues are detected
-        if: steps.trufflehog.outputs.findings == ''
-        uses: actions/github-script@v6
-        with:
-          script: |
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              body: "✅ TruffleHog scan completed successfully. No secrets detected.",
-            });
-
-      - name: Fail the job if secrets are found
-        if: steps.trufflehog.outputs.findings
+      - name: Scan Results Status (Fail if Secrets Found)
+        if: steps.trufflehog.outcome == 'failure'
         run: exit 1
