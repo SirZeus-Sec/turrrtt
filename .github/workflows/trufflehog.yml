@@ -18,6 +18,7 @@ jobs:
       - name: Install TruffleHog
         run: |
           pip install trufflehog
+          trufflehog --version || echo "TruffleHog installation failed"
 
       - name: Get Changed Files (New & Modified)
         id: changed_files
@@ -36,7 +37,9 @@ jobs:
           while read file; do
             if [[ -f "$file" ]]; then  # Ensure it's a valid file
               echo "🔍 Scanning $file..."
-              trufflehog filesystem --json --regex --rules https://raw.githubusercontent.com/trufflesecurity/trufflehog/main/rules.json "$file" | tee -a trufflehog_output.json
+              trufflehog filesystem --json --regex \
+                --rules https://raw.githubusercontent.com/trufflesecurity/trufflehog/main/rules.json \
+                --path="$file" | tee -a trufflehog_output.json
             fi
           done < changed_files.txt
           
@@ -44,3 +47,19 @@ jobs:
             echo "🚨 Secrets detected by TruffleHog!"
             exit 1
           fi
+
+      - name: Post TruffleHog Results as PR Comment
+        if: failure()
+        env:
+          GITHUB_TOKEN: ${{ secrets.MY_GITHUB_TOKEN }}
+        run: |
+          COMMENT="🚨 TruffleHog found secrets in this PR! Please check the logs."
+          PR_NUMBER="${{ github.event.pull_request.number }}"
+          if [[ -z "$PR_NUMBER" ]]; then
+            echo "No PR number found. Skipping comment."
+            exit 0
+          fi
+          curl -s -X POST -H "Authorization: token $GITHUB_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "{\"body\": \"$COMMENT\"}" \
+            "https://api.github.com/repos/${{ github.repository }}/issues/${PR_NUMBER}/comments"
