@@ -37,12 +37,11 @@ jobs:
           while read file; do
             if [[ -f "$file" ]]; then  # Ensure it's a valid file
               echo "🔍 Scanning $file..."
-              trufflehog filesystem --entropy=True --regex \
+              trufflehog filesystem --entropy=True --regex --print-entropy \
                 --rules https://raw.githubusercontent.com/trufflesecurity/trufflehog/main/rules.json \
-                --path="$file" | tee -a trufflehog_output.txt
+                --path=$file | tee -a trufflehog_output.txt
             fi
           done < changed_files.txt
-          
           if grep -q "Reason" trufflehog_output.txt; then
             echo "🚨 Secrets detected by TruffleHog!"
             exit 1
