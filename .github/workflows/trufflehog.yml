@@ -17,7 +17,7 @@ jobs:
           path: ./
           base: ${{ github.event.pull_request.base.sha }}
           head: ${{ github.event.pull_request.head.sha }}
-          extra_args: --debug --only-verified --since-commit ${{ github.event.pull_request.base.sha }}
+          extra_args: --debug --only-verified
 
       - name: Comment on PR if secrets are found
         if: steps.trufflehog.outputs.findings
