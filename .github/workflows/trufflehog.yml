@@ -18,12 +18,17 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 2  # Ensure previous commit is available for comparison
+          fetch-depth: 0  # Fetch full history
 
       - name: Identify Changed Files
         id: changed-files
         run: |
-          git diff --name-only origin/${{ github.base_ref }} HEAD > changed_files.txt
+          BASE_BRANCH="${{ github.event.pull_request.base.ref }}"  
+          echo "Base branch: $BASE_BRANCH"
+          
+          git fetch origin $BASE_BRANCH --depth=1  
+          git diff --name-only origin/$BASE_BRANCH HEAD > changed_files.txt
+
           echo "Changed files:"
           cat changed_files.txt
 
@@ -43,40 +48,3 @@ jobs:
               echo "⚠️ Skipping non-existent file: $file"
             fi
           done < changed_files.txt
-
-      - name: Check for Secrets
-        id: check-secrets
-        run: |
-          if grep -q "Reason" trufflehog_output.json; then
-            echo "secrets_found=true" >> $GITHUB_ENV
-          else
-            echo "secrets_found=false" >> $GITHUB_ENV
-          fi
-
-      - name: Comment on PR if Secrets Found
-        if: env.secrets_found == 'true'
-        run: |
-          COMMENT="🚨 **TruffleHog detected potential secrets!** Please review the scan results."
-          PR_NUMBER="${{ github.event.pull_request.number }}"
-          if [[ -n "$PR_NUMBER" ]]; then
-            curl -s -X POST -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-              -H "Content-Type: application/json" \
-              -d "{\"body\": \"$COMMENT\"}" \
-              "https://api.github.com/repos/${{ github.repository }}/issues/${PR_NUMBER}/comments"
-          fi
-        env:
-          GITHUB_TOKEN: ${{ secrets.MY_GITHUB_TOKEN }}
-
-      - name: Comment on PR if No Secrets Found
-        if: env.secrets_found == 'false'
-        run: |
-          COMMENT="✅ **No secrets detected. Good to go!**"
-          PR_NUMBER="${{ github.event.pull_request.number }}"
-          if [[ -n "$PR_NUMBER" ]]; then
-            curl -s -X POST -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-              -H "Content-Type: application/json" \
-              -d "{\"body\": \"$COMMENT\"}" \
-              "https://api.github.com/repos/${{ github.repository }}/issues/${PR_NUMBER}/comments"
-          fi
-        env:
-          GITHUB_TOKEN: ${{ secrets.MY_GITHUB_TOKEN }}
