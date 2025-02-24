@@ -1,50 +1,66 @@
-name: TruffleHog PR Scanner
-
-on:
-  pull_request:
-    types: [opened, synchronize, reopened]
-  workflow_dispatch:
+name: TruffleHog Secrets Scan
+on: [pull_request]
 
 jobs:
-  scan:
-    name: Run TruffleHog on PR Changes
+  TruffleHog:
     runs-on: ubuntu-latest
-
-    permissions:
-      contents: read
-      pull-requests: write
-
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v3
         with:
-          fetch-depth: 0  # Fetch full history
+          fetch-depth: 0
 
-      - name: Identify Changed Files
+      - name: Get changed files
         id: changed-files
-        run: |
-          BASE_BRANCH="${{ github.event.pull_request.base.ref }}"  
-          echo "Base branch: $BASE_BRANCH"
-          
-          git fetch origin $BASE_BRANCH --depth=1  
-          git diff --name-only origin/$BASE_BRANCH HEAD > changed_files.txt
+        uses: tj-actions/changed-files@v34
+        with:
+          since_last_remote_commit: true
 
-          echo "Changed files:"
-          cat changed_files.txt
+      - name: TruffleHog OSS
+        id: trufflehog
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: ${{ github.event.repository.default_branch }}
+          head: HEAD
+          extra_args: --debug --only-verified --since-commit ${{ github.event.pull_request.base.sha }} --files ${{ steps.changed-files.outputs.all_changed_files }}
 
-      - name: Run TruffleHog on Changed Files
-        run: |
-          if [ ! -s changed_files.txt ]; then
-            echo "No changed files detected. Skipping scan."
-            exit 0
-          fi
+      - name: Comment on PR if secrets are found
+        if: steps.trufflehog.outputs.findings
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
 
-          touch trufflehog_output.json
-          while read -r file; do
-            if [[ -f "$file" ]]; then
-              echo "🔍 Scanning: $file"
-              trufflehog filesystem --json "$file" | tee -a trufflehog_output.json || true
-            else
-              echo "⚠️ Skipping non-existent file: $file"
-            fi
-          done < changed_files.txt
+            const hasExistingComment = comments.some(comment => comment.body.includes("TruffleHog found secrets in the following files:"));
+
+            if (!hasExistingComment) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: `🚨 TruffleHog found secrets in the following files:\n\n${
+                  steps.trufflehog.outputs.findings
+                }\n\nPlease remove these secrets before merging.`,
+              });
+            }
+
+      - name: Add success message if no issues are detected
+        if: steps.trufflehog.outputs.findings == ''
+        uses: actions/github-script@v6
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: "✅ TruffleHog scan completed successfully. No secrets detected.",
+            });
+
+      - name: Fail the job if secrets are found
+        if: steps.trufflehog.outputs.findings
+        run: exit 1
