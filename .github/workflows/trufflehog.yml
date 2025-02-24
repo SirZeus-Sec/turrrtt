@@ -20,23 +20,29 @@ jobs:
           pip install trufflehog
           trufflehog --version || echo "TruffleHog installation failed"
 
-      - name: Get Changed Files
+      - name: Get Changed Files (New & Modified)
         id: changed_files
         run: |
+          git fetch origin ${{ github.event.pull_request.base.ref }}
           BASE_COMMIT=$(git merge-base origin/${{ github.event.pull_request.base.ref }} HEAD)
           echo "Base Commit: $BASE_COMMIT"
-          git diff --name-only $BASE_COMMIT HEAD > changed_files.txt
+          
+          # Get only added or modified files
+          git diff --diff-filter=AM --name-only $BASE_COMMIT HEAD > changed_files.txt
           echo "Changed files:"
           cat changed_files.txt
 
       - name: Run TruffleHog Secret Scan on Changed Files
         run: |
           while read file; do
-            if [[ -f "$file" ]]; then
+            if [[ -f "$file" ]]; then  # Ensure it's a valid file
               echo "🔍 Scanning $file..."
-              trufflehog --regex --entropy=True --max_depth=50 --since_commit $BASE_COMMIT $file | tee -a trufflehog_output.txt
+              trufflehog filesystem --entropy=True --regex \
+                --rules https://raw.githubusercontent.com/trufflesecurity/trufflehog/main/rules.json \
+                --path="$file" | tee -a trufflehog_output.txt
             fi
           done < changed_files.txt
+          
           if grep -q "Reason" trufflehog_output.txt; then
             echo "🚨 Secrets detected by TruffleHog!"
             exit 1
