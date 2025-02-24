@@ -10,20 +10,14 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Get changed files
-        id: changed-files
-        uses: tj-actions/changed-files@v34
-        with:
-          since_last_remote_commit: true
-
       - name: TruffleHog OSS
         id: trufflehog
         uses: trufflesecurity/trufflehog@main
         with:
           path: ./
-          base: ${{ github.event.repository.default_branch }}
-          head: HEAD
-          extra_args: --debug --only-verified --since-commit ${{ github.event.pull_request.base.sha }} --files ${{ steps.changed-files.outputs.all_changed_files }}
+          base: ${{ github.event.pull_request.base.sha }}
+          head: ${{ github.event.pull_request.head.sha }}
+          extra_args: --debug --only-verified --since-commit ${{ github.event.pull_request.base.sha }}
 
       - name: Comment on PR if secrets are found
         if: steps.trufflehog.outputs.findings
