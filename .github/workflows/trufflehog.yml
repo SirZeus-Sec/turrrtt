@@ -26,11 +26,13 @@ jobs:
           git diff --name-only $BASE_COMMIT HEAD > changed_files.txt
           cat changed_files.txt
 
-      - name: Run TruffleHog Secret Scan
+      - name: Run TruffleHog Secret Scan on Changed Files
         run: |
           while read file; do
-            echo "Scanning $file..."
-            trufflehog --regex --entropy=True $file | tee -a trufflehog_output.txt
+            if [[ -f "$file" ]]; then  # Ensure it's a valid file
+              echo "🔍 Scanning $file..."
+              trufflehog filesystem --entropy=True --path=$file | tee -a trufflehog_output.txt
+            fi
           done < changed_files.txt
           if grep -q "Reason" trufflehog_output.txt; then
             echo "🚨 Secrets detected by TruffleHog!"
