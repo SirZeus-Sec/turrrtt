@@ -1,8 +1,9 @@
 name: TruffleHog PR Scanner
+
 on:
   pull_request:
     types: [opened, synchronize, reopened]
-  workflow_dispatch:
+  workflow_dispatch:  # Allows manual trigger
 
 jobs:
   scan:
@@ -17,28 +18,40 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Ensures we have full commit history
+          fetch-depth: 2  # Allows diff comparison
 
-      - name: Run TruffleHog Secret Scan
-        uses: trufflesecurity/trufflehog@v3
+      - name: Run TruffleHog on PR Changes
+        uses: trufflesecurity/trufflehog-actions@v3
         with:
           path: "./"
-          base: "${{ github.event.repository.default_branch }}"  # Base branch (e.g., main)
-          head: "HEAD"  # PR branch
-          extra_args: "--only-verified --debug"
+          base: "${{ github.event.pull_request.base.sha }}"  # Base branch commit
+          head: "${{ github.event.pull_request.head.sha }}"  # PR latest commit
+          extra_args: "--only-verified --json"
 
-      - name: Post TruffleHog Results as PR Comment
+      - name: Post TruffleHog Results as PR Comment (if secrets found)
         if: failure()
         run: |
-          COMMENT="🚨 TruffleHog found secrets in this PR! Please check the logs."
+          COMMENT="🚨 **TruffleHog found leaked credentials in this PR!** Please check the logs and remove sensitive information before merging."
           PR_NUMBER="${{ github.event.pull_request.number }}"
-          if [[ -z "$PR_NUMBER" ]]; then
-            echo "No PR number found. Skipping comment."
-            exit 0
-          fi
           curl -s -X POST -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
             -H "Content-Type: application/json" \
             -d "{\"body\": \"$COMMENT\"}" \
             "https://api.github.com/repos/${{ github.repository }}/issues/${PR_NUMBER}/comments"
         env:
           GITHUB_TOKEN: ${{ secrets.MY_GITHUB_TOKEN }}
+
+      - name: Post Success Comment (if no secrets found)
+        if: success()
+        run: |
+          COMMENT="✅ **TruffleHog scan completed: No leaked credentials detected!** PR is safe to merge."
+          PR_NUMBER="${{ github.event.pull_request.number }}"
+          curl -s -X POST -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d "{\"body\": \"$COMMENT\"}" \
+            "https://api.github.com/repos/${{ github.repository }}/issues/${PR_NUMBER}/comments"
+        env:
+          GITHUB_TOKEN: ${{ secrets.MY_GITHUB_TOKEN }}
+
+      - name: Fail the workflow if secrets are detected
+        if: failure()
+        run: exit 1  # Blocks merging if secrets are found
