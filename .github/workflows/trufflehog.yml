@@ -1,34 +1,46 @@
-name: TruffleHog PR Scanner
+name: trufflehog
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
+    branches:
+      - "**"  # Triggers on all branches
   workflow_dispatch:
 
 jobs:
   scan:
-    name: Run TruffleHog on PR Changes
+    name: trufflehog
     runs-on: ubuntu-latest
-
-    permissions:
-      contents: read
-      pull-requests: write
-
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Ensures we have full commit history
+          fetch-depth: 0  # Fetch full history for accurate scanning
+
+      - name: Install TruffleHog
+        run: |
+          pip install trufflehog
+
+      - name: Get Changed Files
+        id: changed_files
+        run: |
+          BASE_COMMIT=$(git merge-base origin/${{ github.event.pull_request.base.ref }} HEAD)
+          echo "Base Commit: $BASE_COMMIT"
+          git diff --name-only $BASE_COMMIT HEAD > changed_files.txt
+          cat changed_files.txt
 
       - name: Run TruffleHog Secret Scan
-        uses: trufflesecurity/trufflehog@v3
-        with:
-          path: "./"
-          base: "${{ github.event.repository.default_branch }}"  # Base branch (e.g., main)
-          head: "HEAD"  # PR branch
-          extra_args: "--only-verified --debug"
+        run: |
+          while read file; do
+            echo "Scanning $file..."
+            trufflehog --regex --entropy=True $file | tee -a trufflehog_output.txt
+          done < changed_files.txt
+          if grep -q "Reason" trufflehog_output.txt; then
+            echo "🚨 Secrets detected by TruffleHog!"
+            exit 1
+          fi
 
       - name: Post TruffleHog Results as PR Comment
         if: failure()
+        env:
+          GITHUB_TOKEN: ${{ secrets.MY_GITHUB_TOKEN }} 
         run: |
           COMMENT="🚨 TruffleHog found secrets in this PR! Please check the logs."
           PR_NUMBER="${{ github.event.pull_request.number }}"
@@ -36,9 +48,7 @@ jobs:
             echo "No PR number found. Skipping comment."
             exit 0
           fi
-          curl -s -X POST -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+          curl -s -X POST -H "Authorization: token $GITHUB_TOKEN" \
             -H "Content-Type: application/json" \
             -d "{\"body\": \"$COMMENT\"}" \
             "https://api.github.com/repos/${{ github.repository }}/issues/${PR_NUMBER}/comments"
-        env:
-          GITHUB_TOKEN: ${{ secrets.MY_GITHUB_TOKEN }}
