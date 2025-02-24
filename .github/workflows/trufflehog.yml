@@ -9,6 +9,9 @@ jobs:
   scan:
     name: TruffleHog Secret Scan
     runs-on: ubuntu-latest
+    permissions:
+      contents: read   # Required to checkout the code
+      pull-requests: write  # Required to comment on pull requests
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -37,27 +40,12 @@ jobs:
           while read file; do
             if [[ -f "$file" ]]; then  # Ensure it's a valid file
               echo "🔍 Scanning $file..."
-              trufflehog filesystem --json --regex --rules https://raw.githubusercontent.com/trufflesecurity/trufflehog/main/rules.json "$file" | tee -a trufflehog_output.json
+              trufflehog filesystem --entropy=True --regex --print-entropy \
+                --rules https://raw.githubusercontent.com/trufflesecurity/trufflehog/main/rules.json \
+                --path=$file | tee -a trufflehog_output.txt
             fi
           done < changed_files.txt
-          
-          if grep -q '"SourceMetadata"' trufflehog_output.json; then
+          if grep -q "Reason" trufflehog_output.txt; then
             echo "🚨 Secrets detected by TruffleHog!"
             exit 1
           fi
-
-      - name: Post TruffleHog Results as PR Comment
-        if: failure()
-        env:
-          GITHUB_TOKEN: ${{ secrets.MY_GITHUB_TOKEN }}
-        run: |
-          COMMENT="🚨 TruffleHog found secrets in this PR! Please check the logs."
-          PR_NUMBER="${{ github.event.pull_request.number }}"
-          if [[ -z "$PR_NUMBER" ]]; then
-            echo "No PR number found. Skipping comment."
-            exit 0
-          fi
-          curl -s -X POST -H "Authorization: token $GITHUB_TOKEN" \
-            -H "Content-Type: application/json" \
-            -d "{\"body\": \"$COMMENT\"}" \
-            "https://api.github.com/repos/${{ github.repository }}/issues/${PR_NUMBER}/comments"
