@@ -18,10 +18,20 @@ jobs:
         run: |
           pip install trufflehog
 
-      - name: Run TruffleHog Secret Scan
+      - name: Get Changed Files
+        id: changed_files
         run: |
           BASE_COMMIT=$(git merge-base origin/${{ github.event.pull_request.base.ref }} HEAD)
-          trufflehog --regex --entropy=True --max_depth=50 --since-commit $BASE_COMMIT . | tee trufflehog_output.txt
+          echo "Base Commit: $BASE_COMMIT"
+          git diff --name-only $BASE_COMMIT HEAD > changed_files.txt
+          cat changed_files.txt
+
+      - name: Run TruffleHog Secret Scan
+        run: |
+          while read file; do
+            echo "Scanning $file..."
+            trufflehog --regex --entropy=True $file | tee -a trufflehog_output.txt
+          done < changed_files.txt
           if grep -q "Reason" trufflehog_output.txt; then
             echo "🚨 Secrets detected by TruffleHog!"
             exit 1
