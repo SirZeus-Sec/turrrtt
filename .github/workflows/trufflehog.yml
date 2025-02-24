@@ -18,25 +18,31 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 2  # Fetch the previous commit for diff comparison
-
-      - name: Install TruffleHog
-        run: |
-          pip install trufflehog
+          fetch-depth: 2  # Ensure previous commit is available for comparison
 
       - name: Identify Changed Files
         id: changed-files
         run: |
-          git fetch origin ${{ github.base_ref }} --depth=1
           git diff --name-only origin/${{ github.base_ref }} HEAD > changed_files.txt
+          echo "Changed files:"
           cat changed_files.txt
 
       - name: Run TruffleHog on Changed Files
         run: |
+          if [ ! -s changed_files.txt ]; then
+            echo "No changed files detected. Skipping scan."
+            exit 0
+          fi
+
+          touch trufflehog_output.json
           while read -r file; do
-            echo "Scanning: $file"
-            trufflehog filesystem --json "$file" | tee -a trufflehog_output.json
-          done < changed_files.txt || true
+            if [[ -f "$file" ]]; then
+              echo "🔍 Scanning: $file"
+              trufflehog filesystem --json "$file" | tee -a trufflehog_output.json || true
+            else
+              echo "⚠️ Skipping non-existent file: $file"
+            fi
+          done < changed_files.txt
 
       - name: Check for Secrets
         id: check-secrets
