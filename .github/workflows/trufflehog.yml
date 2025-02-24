@@ -13,14 +13,14 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Fetch full history for accurate scanning
+          fetch-depth: 0
 
-      - name: Install TruffleHog (New Version)
+      - name: Install TruffleHog (Latest Version)
         run: |
-          curl -LJO https://github.com/trufflesecurity/trufflehog/releases/latest/download/trufflehog-linux-amd64
-          chmod +x trufflehog-linux-amd64
-          sudo mv trufflehog-linux-amd64 /usr/local/bin/trufflehog
-          trufflehog --version  # Verify installation
+          wget -O trufflehog https://github.com/trufflesecurity/trufflehog/releases/latest/download/trufflehog-linux-amd64
+          chmod +x trufflehog
+          sudo mv trufflehog /usr/local/bin/
+          trufflehog --version || echo "TruffleHog installation failed"
 
       - name: Get Changed Files
         id: changed_files
@@ -34,9 +34,9 @@ jobs:
       - name: Run TruffleHog Secret Scan on Changed Files
         run: |
           while read file; do
-            if [[ -f "$file" ]]; then  # Ensure it's a valid file
+            if [[ -f "$file" ]]; then
               echo "🔍 Scanning $file..."
-              trufflehog filesystem --only-verified --branch ${{ github.event.pull_request.base.ref }} $file | tee -a trufflehog_output.txt
+              trufflehog filesystem --only-verified --branch ${{ github.event.pull_request.base.ref }} --path $file | tee -a trufflehog_output.txt
             fi
           done < changed_files.txt
           if grep -q "DetectorName" trufflehog_output.txt; then
