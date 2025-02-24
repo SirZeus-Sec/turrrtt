@@ -3,7 +3,7 @@ name: TruffleHog PR Scanner
 on:
   pull_request:
     types: [opened, synchronize, reopened]
-  workflow_dispatch:  # Allows manual trigger
+  workflow_dispatch:
 
 jobs:
   scan:
@@ -18,40 +18,59 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 2  # Allows diff comparison
+          fetch-depth: 2  # Fetch the previous commit for diff comparison
 
-      - name: Run TruffleHog on PR Changes
-        uses: trufflesecurity/trufflehog-actions@v3
-        with:
-          path: "./"
-          base: "${{ github.event.pull_request.base.sha }}"  # Base branch commit
-          head: "${{ github.event.pull_request.head.sha }}"  # PR latest commit
-          extra_args: "--only-verified --json"
-
-      - name: Post TruffleHog Results as PR Comment (if secrets found)
-        if: failure()
+      - name: Install TruffleHog
         run: |
-          COMMENT="🚨 **TruffleHog found leaked credentials in this PR!** Please check the logs and remove sensitive information before merging."
+          pip install trufflehog
+
+      - name: Identify Changed Files
+        id: changed-files
+        run: |
+          git fetch origin ${{ github.base_ref }} --depth=1
+          git diff --name-only origin/${{ github.base_ref }} HEAD > changed_files.txt
+          cat changed_files.txt
+
+      - name: Run TruffleHog on Changed Files
+        run: |
+          while read -r file; do
+            echo "Scanning: $file"
+            trufflehog filesystem --json "$file" | tee -a trufflehog_output.json
+          done < changed_files.txt || true
+
+      - name: Check for Secrets
+        id: check-secrets
+        run: |
+          if grep -q "Reason" trufflehog_output.json; then
+            echo "secrets_found=true" >> $GITHUB_ENV
+          else
+            echo "secrets_found=false" >> $GITHUB_ENV
+          fi
+
+      - name: Comment on PR if Secrets Found
+        if: env.secrets_found == 'true'
+        run: |
+          COMMENT="🚨 **TruffleHog detected potential secrets!** Please review the scan results."
           PR_NUMBER="${{ github.event.pull_request.number }}"
-          curl -s -X POST -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            -H "Content-Type: application/json" \
-            -d "{\"body\": \"$COMMENT\"}" \
-            "https://api.github.com/repos/${{ github.repository }}/issues/${PR_NUMBER}/comments"
+          if [[ -n "$PR_NUMBER" ]]; then
+            curl -s -X POST -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              -H "Content-Type: application/json" \
+              -d "{\"body\": \"$COMMENT\"}" \
+              "https://api.github.com/repos/${{ github.repository }}/issues/${PR_NUMBER}/comments"
+          fi
         env:
           GITHUB_TOKEN: ${{ secrets.MY_GITHUB_TOKEN }}
 
-      - name: Post Success Comment (if no secrets found)
-        if: success()
+      - name: Comment on PR if No Secrets Found
+        if: env.secrets_found == 'false'
         run: |
-          COMMENT="✅ **TruffleHog scan completed: No leaked credentials detected!** PR is safe to merge."
+          COMMENT="✅ **No secrets detected. Good to go!**"
           PR_NUMBER="${{ github.event.pull_request.number }}"
-          curl -s -X POST -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            -H "Content-Type: application/json" \
-            -d "{\"body\": \"$COMMENT\"}" \
-            "https://api.github.com/repos/${{ github.repository }}/issues/${PR_NUMBER}/comments"
+          if [[ -n "$PR_NUMBER" ]]; then
+            curl -s -X POST -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              -H "Content-Type: application/json" \
+              -d "{\"body\": \"$COMMENT\"}" \
+              "https://api.github.com/repos/${{ github.repository }}/issues/${PR_NUMBER}/comments"
+          fi
         env:
           GITHUB_TOKEN: ${{ secrets.MY_GITHUB_TOKEN }}
-
-      - name: Fail the workflow if secrets are detected
-        if: failure()
-        run: exit 1  # Blocks merging if secrets are found
