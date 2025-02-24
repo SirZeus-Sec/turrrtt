@@ -15,11 +15,9 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install TruffleHog (Latest Version)
+      - name: Install TruffleHog
         run: |
-          wget -O trufflehog https://github.com/trufflesecurity/trufflehog/releases/latest/download/trufflehog-linux-amd64
-          chmod +x trufflehog
-          sudo mv trufflehog /usr/local/bin/
+          pip install trufflehog
           trufflehog --version || echo "TruffleHog installation failed"
 
       - name: Get Changed Files
@@ -36,10 +34,10 @@ jobs:
           while read file; do
             if [[ -f "$file" ]]; then
               echo "🔍 Scanning $file..."
-              trufflehog filesystem --only-verified --branch ${{ github.event.pull_request.base.ref }} --path $file | tee -a trufflehog_output.txt
+              trufflehog --regex --entropy=True --max_depth=50 --since_commit $BASE_COMMIT $file | tee -a trufflehog_output.txt
             fi
           done < changed_files.txt
-          if grep -q "DetectorName" trufflehog_output.txt; then
+          if grep -q "Reason" trufflehog_output.txt; then
             echo "🚨 Secrets detected by TruffleHog!"
             exit 1
           fi
