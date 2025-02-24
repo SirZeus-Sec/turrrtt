@@ -9,9 +9,6 @@ jobs:
   scan:
     name: TruffleHog Secret Scan
     runs-on: ubuntu-latest
-    permissions:
-      contents: read   # Required to checkout the code
-      pull-requests: write  # Required to comment on pull requests
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -21,7 +18,6 @@ jobs:
       - name: Install TruffleHog
         run: |
           pip install trufflehog
-          trufflehog --version || echo "TruffleHog installation failed"
 
       - name: Get Changed Files (New & Modified)
         id: changed_files
@@ -40,12 +36,11 @@ jobs:
           while read file; do
             if [[ -f "$file" ]]; then  # Ensure it's a valid file
               echo "🔍 Scanning $file..."
-              trufflehog filesystem --entropy=True --regex --print-entropy \
-                --rules https://raw.githubusercontent.com/trufflesecurity/trufflehog/main/rules.json \
-                --path=$file | tee -a trufflehog_output.txt
+              trufflehog filesystem --json --regex --rules https://raw.githubusercontent.com/trufflesecurity/trufflehog/main/rules.json "$file" | tee -a trufflehog_output.json
             fi
           done < changed_files.txt
-          if grep -q "Reason" trufflehog_output.txt; then
+          
+          if grep -q '"SourceMetadata"' trufflehog_output.json; then
             echo "🚨 Secrets detected by TruffleHog!"
             exit 1
           fi
