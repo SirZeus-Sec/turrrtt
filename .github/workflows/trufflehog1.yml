@@ -1,0 +1,35 @@
+name: Secret Scanning with TruffleHog
+
+on:
+  pull_request:
+    branches:
+      - main  # Change this to match your default branch
+
+jobs:
+  secret-scan:
+    name: Scan PR for Secrets
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Ensures full history for diff scanning
+
+      - name: Install TruffleHog
+        run: |
+          pip install trufflehog
+
+      - name: Run TruffleHog on PR Diff
+        run: |
+          trufflehog git . --only-verified --json > trufflehog_results.json || true
+
+      - name: Fail if secrets are detected
+        run: |
+          if [ -s trufflehog_results.json ]; then
+            echo "Secrets detected!"
+            cat trufflehog_results.json
+            exit 1
+          else
+            echo "No secrets found."
+          fi
