@@ -1,35 +1,77 @@
-name: Secret Scanning with TruffleHog
+name: TruffleHog Secret Scan 🔎 🔒
 
 on:
   pull_request:
     branches:
-      - main  # Change this to match your default branch
+      - main
 
 jobs:
-  secret-scan:
-    name: Scan PR for Secrets
+  trufflehog_scan:
     runs-on: ubuntu-latest
-
+    if: github.event_name == 'pull_request' && (inputs.DISABLE_TruffleHog != 'true')
     steps:
-      - name: Checkout Code
+      - name: Checkout Repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Ensures full history for diff scanning
+          fetch-depth: 0
 
       - name: Install TruffleHog
-        run: |
-          pip install trufflehog
+        run: curl -sSfL https://raw.githubusercontent.com/trufflesecurity/trufflehog/main/scripts/install.sh | sh -s -- -b /usr/local/bin
 
-      - name: Run TruffleHog on PR Diff
+      - name: Get Changed Files
         run: |
-          trufflehog git . --only-verified --json > trufflehog_results.json || true
+          BASE_SHA=$(git merge-base origin/${{ github.base_ref }} HEAD)
+          HEAD_SHA="${{ github.sha }}"
+          echo "BASE_SHA=$BASE_SHA"
+          echo "HEAD_SHA=$HEAD_SHA"
+          echo "CHANGED_FILES=$(git diff --name-only $BASE_SHA $HEAD_SHA | tr '\n' ' ')" >> $GITHUB_ENV
 
-      - name: Fail if secrets are detected
+      - name: Run TruffleHog on PR Changed Files
+        id: trufflehog_scan
         run: |
-          if [ -s trufflehog_results.json ]; then
-            echo "Secrets detected!"
-            cat trufflehog_results.json
-            exit 1
-          else
-            echo "No secrets found."
-          fi
+          EXIT_CODE=0
+          SCAN_RESULTS=""
+          SECRET_FOUND=false
+          # Loop over each file in CHANGED_FILES
+          for file in $CHANGED_FILES; do
+            echo "Scanning $file..."
+            # Filter TruffleHog output to exclude log lines and keep only secret findings
+            RESULT=$(trufflehog filesystem --no-verification "$file" 2>&1 || true | grep -v '^[0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}T' || true)
+            echo "$RESULT"
+            SCAN_RESULTS+="$RESULT"$'\n\n'
+            if echo "$RESULT" | grep -q 'Reason:'; then
+              SECRET_FOUND=true
+              EXIT_CODE=1
+            fi
+          done
+          # Build the comment message
+          BASE_MESSAGE="🔍 **TruffleHog Scan Results** 🔍\n\n- ✅ Scan **Completed**\n- 🚀 Repository: ${{ github.repository }}\n- 📄 Files Scanned: ${{ env.CHANGED_FILES }}\n\n**Results:**\n"
+          RESULTS_MESSAGE=$([[ "$SECRET_FOUND" == "true" ]] && echo "- ❌ Secrets detected! Workflow failed to prevent merging. Please rotate secrets and address the issue." || echo "- ✅ No secrets found!")
+          SCAN_DETAILS="**Scan Details:** [View Full Report](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})"
+          SCAN_OUTPUT=$([[ "$SECRET_FOUND" == "true" ]] && echo "\n**Scan Output:**\n```\n$SCAN_RESULTS\n```" || echo "")
+          COMMENT_MESSAGE="$BASE_MESSAGE$RESULTS_MESSAGE\n$SCAN_DETAILS$SCAN_OUTPUT"
+          echo "SECRET_FOUND=$SECRET_FOUND" >> $GITHUB_ENV
+          echo "SCAN_OUTPUT=$SCAN_RESULTS" >> $GITHUB_ENV
+          echo "COMMENT_MESSAGE=$COMMENT_MESSAGE" >> $GITHUB_ENV
+          echo "$SCAN_RESULTS" > scan_results.txt
+          exit $EXIT_CODE
+
+      - name: Upload Scan Results as Artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: TruffleHog-Scan-Results
+          path: scan_results.txt
+          retention-days: 5
+
+      - name: Debug Comment Message
+        if: always()
+        run: |
+          echo "Comment Message: $COMMENT_MESSAGE"
+
+      - name: Comment on PR with Scan Results
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ secrets.MY_GITHUB_TOKEN }}
+        run: |
+          gh pr comment ${{ github.event.pull_request.number }} --body "$COMMENT_MESSAGE"
