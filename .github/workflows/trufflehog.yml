@@ -1,40 +1,88 @@
-name: PR Secret Scanner
+name: TruffleHog Secret Scan 🔎 🔒
 
 on:
   pull_request:
-    types: [opened, synchronize]
-  issue_comment:
-    types: [created]
-
-permissions:
-  contents: read
-  pull-requests: write  # ✅ Allows commenting on PRs
+    branches:
+      - main
 
 jobs:
   trufflehog_scan:
-    name: Secret Scan with TruffleHog
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write # Needed to post comments
+
     steps:
-      - name: Checkout Code
+      - name: Checkout Repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 1  # ✅ Scan only new changes in the PR
+          fetch-depth: 0
 
-      - name: Run TruffleHog on PR Changes
-        id: trufflehog
-        continue-on-error: true  # ✅ Prevents stopping the workflow
-        uses: haydz/trufflehog-actions-scan@master  # 🔹 Fixed version
+      - name: Install TruffleHog
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/trufflesecurity/trufflehog/main/scripts/install.sh | sh -s -- -b /usr/local/bin
+
+      - name: Get Changed Files
+        run: |
+          BASE_SHA=$(git merge-base origin/${{ github.base_ref }} HEAD)
+          HEAD_SHA="${{ github.sha }}"
+          echo "BASE_SHA=$BASE_SHA"
+          echo "HEAD_SHA=$HEAD_SHA"
+          CHANGED_FILES=$(git diff --name-only $BASE_SHA $HEAD_SHA | tr '\n' ' ')
+          echo "CHANGED_FILES=$CHANGED_FILES" >> $GITHUB_ENV
+          echo "Changed Files: $CHANGED_FILES"
+
+      - name: Run TruffleHog on PR Changed Files
+        run: |
+          EXIT_CODE=0
+          SCAN_RESULTS=""
+          SECRET_FOUND=false
+          for file in $CHANGED_FILES; do
+            if [[ -f "$file" ]]; then  # Only scan actual files
+              echo "Scanning $file..."
+              RAW_RESULT=$(trufflehog filesystem --no-verification "$file" 2>&1 || true)
+              RESULT=$(echo "$RAW_RESULT" | grep -v '^[0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}T' || true)
+              SCAN_RESULTS+="$RESULT"$'\n\n'
+              if echo "$RESULT" | grep -q 'Reason:'; then
+                SECRET_FOUND=true
+                EXIT_CODE=1
+              fi
+            else
+              echo "Skipping non-existent file: $file"
+            fi
+          done
+          echo "SECRET_FOUND=$SECRET_FOUND" >> $GITHUB_ENV
+          echo "$SCAN_RESULTS" > scan_results.txt
+          echo "SCAN_RESULTS<<EOF" >> $GITHUB_ENV
+          echo "$SCAN_RESULTS" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+          exit $EXIT_CODE
+
+      - name: Upload Scan Results as Artifact
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
-          scanArguments: "--regex --entropy=False --json --max_depth=1"
+          name: TruffleHog-Scan-Results
+          path: scan_results.txt
+          retention-days: 5
 
-      - name: Post Comment on PR if Secrets Found
-        if: failure()
+      - name: Install GitHub CLI
+        run: |
+          sudo apt update && sudo apt install -y gh
+
+      - name: Comment on PR with Scan Results
+        if: always()
         env:
           GITHUB_TOKEN: ${{ secrets.MY_GITHUB_TOKEN }}
-          PR_URL: ${{ github.event.pull_request.html_url }}
         run: |
-          COMMENT="🚨 TruffleHog found secrets in this PR! Please check the logs."
-          curl -s -X POST -H "Authorization: token $GITHUB_TOKEN" \
-               -H "Accept: application/vnd.github.v3+json" \
-               https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments \
-               -d "{\"body\": \"$COMMENT\"}"
+          COMMENT_BODY="🔍 **TruffleHog Scan Results** 🔍\n\n- ✅ Scan **Completed**\n- 🚀 Repository: ${{ github.repository }}\n- 📄 Files Scanned: $CHANGED_FILES\n\n"
+
+          if [[ "$SECRET_FOUND" == "true" ]]; then
+            COMMENT_BODY+="🚨 **Secrets detected!** ❌\nPlease rotate secrets and remove them from the repository.\n"
+            COMMENT_BODY+="\n**Scan Output:**\n\`\`\`\n$(cat scan_results.txt)\n\`\`\`"
+          else
+            COMMENT_BODY+="✅ **No secrets found!**"
+          fi
+
+          PR_NUMBER="${{ github.event.pull_request.number }}"
+          gh pr comment "$PR_NUMBER" --body "$COMMENT_BODY"
