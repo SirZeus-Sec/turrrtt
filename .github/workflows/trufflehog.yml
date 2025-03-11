@@ -9,6 +9,8 @@ jobs:
   trufflehog_scan:
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request' && (inputs.DISABLE_TruffleHog != 'true')
+    permissions:
+      contents: write # Grant write access to push changes
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -35,6 +37,8 @@ jobs:
           git config --global user.name "Test User"
           git add test_secrets.txt
           git commit -m "Add test file with dummy API keys for TruffleHog scan"
+          # Debug the head ref
+          echo "Head Ref: ${{ github.head_ref }}"
           git push origin HEAD:${{ github.head_ref }}
 
       - name: Run TruffleHog on PR Changed Files
