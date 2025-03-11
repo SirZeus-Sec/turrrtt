@@ -9,6 +9,8 @@ jobs:
   trufflehog_scan:
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request' && (inputs.DISABLE_TruffleHog != 'true')
+    permissions:
+      contents: write # Grant write access to push changes
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -25,6 +27,19 @@ jobs:
           echo "BASE_SHA=$BASE_SHA"
           echo "HEAD_SHA=$HEAD_SHA"
           echo "CHANGED_FILES=$(git diff --name-only $BASE_SHA $HEAD_SHA | tr '\n' ' ')" >> $GITHUB_ENV
+
+      - name: Create Test File with Dummy API Keys
+        run: |
+          echo "AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE" > test_secrets.txt
+          echo "GITHUB_TOKEN=ghp_1234567890abcdef" >> test_secrets.txt
+          echo "API_KEY=xyz123456789" >> test_secrets.txt
+          git config --global user.email "test@example.com"
+          git config --global user.name "Test User"
+          git add test_secrets.txt
+          git commit -m "Add test file with dummy API keys for TruffleHog scan"
+          # Debug the head ref
+          echo "Head Ref: ${{ github.head_ref }}"
+          git push origin HEAD:${{ github.head_ref }}
 
       - name: Run TruffleHog on PR Changed Files
         id: trufflehog_scan
