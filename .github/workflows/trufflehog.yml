@@ -26,6 +26,17 @@ jobs:
           echo "HEAD_SHA=$HEAD_SHA"
           echo "CHANGED_FILES=$(git diff --name-only $BASE_SHA $HEAD_SHA | tr '\n' ' ')" >> $GITHUB_ENV
 
+      - name: Create Test File with Dummy API Keys
+        run: |
+          echo "AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE" > test_secrets.txt
+          echo "GITHUB_TOKEN=ghp_1234567890abcdef" >> test_secrets.txt
+          echo "API_KEY=xyz123456789" >> test_secrets.txt
+          git config --global user.email "test@example.com"
+          git config --global user.name "Test User"
+          git add test_secrets.txt
+          git commit -m "Add test file with dummy API keys for TruffleHog scan"
+          git push origin HEAD:${{ github.head_ref }}
+
       - name: Run TruffleHog on PR Changed Files
         id: trufflehog_scan
         run: |
